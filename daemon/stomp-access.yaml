@@ -1,0 +1,31 @@
+---
+# Stomp connection options.
+#
+stompconnector:
+  :reliable: true
+  :hosts:
+  - :login: broker-login
+    :passcode: broker-password
+    :host: broker01
+    :port: 61613
+    :ssl: false
+  - :login: broker-login
+    :passcode: broker-password
+    :host: broker02
+    :port: 61613
+    :ssl: false
+
+#
+report-topic: future.events.stageaccess
+listen-topic: future.access.stage
+
+sites:
+
+#  example-site:
+#    file: /etc/nginx/includes/example-preview.access
+#    users: /etc/nginx/includes/example-preview.users
+#    type: nginx
+#  different-site:
+#    type: haproxy
+#    file: /etc/haproxy/different.access
+#    users: /etc/haproxy/different.users 

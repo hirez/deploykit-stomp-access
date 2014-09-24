@@ -1,0 +1,23 @@
+---
+stompconnector:
+  :reliable: true
+  :hosts:
+  - :login: broker-login
+    :passcode: broker-password
+    :host: broker01
+    :port: 61613
+    :ssl: false
+  - :login: broker-login
+    :passcode: broker-password
+    :host: broker02
+    :port: 61613
+    :ssl: false
+
+#
+#
+report-topic: future.events.stageaccess
+user-topic: future.access.stage
+
+sites:
+  Example site: example-site
+  Different site (HAProxy): different-site

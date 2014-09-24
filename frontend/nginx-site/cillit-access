@@ -1,0 +1,32 @@
+upstream app_server_cillit-access
+  server unix:/var/run/unicorn/cillit-access.sock fail_timeout=0;
+}
+
+server {
+  listen <%= ipaddress %>:80; 
+  server_name cillit-access.your.dom.ain;
+
+  access_log  /var/log/nginx/cillit-access.access.log;
+
+  satisfy any;
+  # Your netblock(s) go here.
+  allow 192.168.0.0/24;
+  allow 127.0.0.1;
+  deny all;
+
+  keepalive_timeout 5;
+
+  # path for static files
+  root /var/tmp;
+
+  # Prefer to serve static files directly from nginx to avoid unnecessary
+  # data copies from the application server.
+  try_files $uri/index.html $uri.html $uri @app_server_cillit-access;
+
+  location @app_server_cillit-access {
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Host $http_host;
+    proxy_redirect off;
+    proxy_pass http://app_server_cillit-access;
+  }
+}

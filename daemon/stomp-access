@@ -1,0 +1,255 @@
+#!/usr/bin/env ruby 
+
+require 'rubygems'
+require 'yaml'
+require 'systemu'
+require 'stomp'
+require 'logger'
+require 'optparse'
+require 'date'
+require 'socket'
+require 'base64'
+
+ 
+options = {}
+version = "0.6"
+pidfile = '/var/run/stomp-access.pid'
+
+
+# stdout and stderr require an io handle to write to... this makes Logger one :)
+class Logwrite
+  def initialize(logger, type)
+    @log = logger
+    @type = type
+  end
+
+  def write(message)
+    if @type == "stderr"
+      @log.error(message)
+    elsif @type == "stdout"
+      @log.info(message)
+    end
+    return message.to_s.bytesize
+  end
+
+  # Dummy method to keep what passes for the standard i/o library happy.
+  def flush
+    #
+  end
+
+  alias puts write
+  alias print write
+  alias p write
+end
+
+def update_accesslist(userlist,accessfile,accesstype,username,password,debug)
+
+  salt = Base64.encode64((("a".."z").to_a + ("A".."Z").to_a + (0..9).to_a).shuffle[0..7].join)
+  spw = password.crypt(salt)
+
+  if File.exist?(userlist)
+    users_e = YAML.load_file(userlist)
+    puts users_e.inspect if debug
+  else
+    users_e = Hash.new{ |h,k| h[k] = Hash.new(&h.default_proc) }
+  end
+
+  case accesstype
+    when "haproxy"
+      accessconf = "\tuser %s password %s"
+    when "nginx"
+      accessconf = "%s:%s"
+    else
+      puts "Unknown type: #{accesstype}" if debug
+      return
+  end
+
+  rightnow = Date.today
+  expiry = rightnow + 14
+
+  users_e[username] = {'expiry'=> expiry.asctime, 'password'=> spw.to_s}
+
+  users_e.each_key do |key|
+    puts "#{key} : #{users_e[key]['password']} / #{users_e[key]['expiry']}" if debug
+
+    if File.exist?(userlist)
+      oldexpiry = Date.parse(users_e[key]['expiry'])
+    else
+      oldexpiry = rightnow
+    end
+
+    expired = oldexpiry - rightnow
+
+    if expired < 0
+      users_e.delete(key)
+      message = "Expiring #{key} from #{accessfile} - #{oldexpiry} < #{rightnow}"
+      $log.info(message)
+      puts message if debug
+    end
+  end
+
+  File.open(userlist,'w') {|f| f.write users_e.to_yaml }
+
+  aname = File.basename(accessfile)
+
+  File.open(accessfile,'w') do |afile|
+    afile.puts "userlist #{aname}"
+    users_e.each_key do |key|
+      fline = sprintf(accessconf,key,users_e[key]['password'])
+      afile.puts(fline)
+    end
+  end
+
+  case accesstype
+    when "haproxy"
+      reload_haproxy
+    when "nginx"
+      reload_nginx
+    else
+      puts "Cannot reload #{accesstype}. Unknown type: #{accesstype}" if debug
+  end
+
+end
+
+def logmessage(message,sclient,topic,debug)
+  $log.info(message)
+  host_name = Socket::gethostname
+  smessage = host_name + " " + message
+  begin
+    sclient.publish("/topic/#{topic}",smessage, {:subject => "Talking to eventbot"}) if sclient
+  rescue Exception => e
+    emessage = "Exception: #{e}"
+    $log.error(emessage)
+    puts emessage if debug
+  end
+  puts message if debug
+end
+
+def dump_message(mess)
+  puts "Subject: #{mess.headers["subject"]}"
+  puts "Message-ID: #{mess.headers["message-id"]}"
+  puts "--"
+  puts mess.body
+  puts "--"
+end
+
+def reload_haproxy
+  $log.info("Reloading haproxy configuration")
+  system("/etc/init.d/haproxy reload")
+end
+
+def reload_nginx
+  $log.info("Reloading nginx configuration")
+  system("/etc/init.d/nginx reload")
+end
+
+optparse = OptionParser.new do|opts|
+  opts.banner = "Usage: stomp-access.rb [options]"
+ 
+  options[:debug] = false
+  opts.on( '-d', '--debug', 'Much output, do not detach' ) do
+    options[:debug] = true
+  end
+ 
+  options[:configfile] = "/etc/stomp-access/stomp-access.yaml"
+  opts.on( '-c', '--config FILE', 'Config is FILE' ) do|file|
+    options[:configfile] = file
+  end
+ 
+  opts.on( '-h', '--help', 'Display this screen' ) do
+    puts opts
+        exit
+  end
+end
+
+optparse.parse!
+
+$log = Logger.new("/var/log/stomp-access.log")
+$log.level = Logger::INFO
+
+if !options[:debug]
+  $stderr = Logwrite.new($log, "stderr")
+  $stdout = Logwrite.new($log, "stdout")
+  pid = Process.fork
+else
+  pid = nil
+  puts "DEBUG"
+  puts "VERSION #{version}"
+  puts "CONFIGFILE: #{options[:configfile]}"
+end
+
+if pid.nil?
+  Signal.trap("TERM") do
+    $log.info("Terminating.")
+        exit
+    end
+
+  Signal.trap("HUP") do
+    yconfig = YAML.load_file(options[:configfile])
+    $log.info("Re-read #{options[:configfile]}")
+  end
+
+  yconfig = YAML.load_file(options[:configfile])
+  sdebug = options[:debug]
+
+  puts YAML.dump(yconfig) if sdebug
+
+  stompconnector = yconfig['stompconnector']
+  listen_topic = yconfig["listen-topic"]
+  report_topic = yconfig["report-topic"]
+  sites = yconfig["sites"]
+
+  client = Stomp::Client.new(stompconnector)
+
+  if client
+    logmessage("V. #{version} connected to #{listen_topic}",client,report_topic,sdebug)
+
+    client.subscribe "/topic/#{listen_topic}" do |message|
+      if message.body == "\n"
+        puts "Bodge-beat frame" if sdebug
+      else
+        sitename = ""
+        username = ""
+        password = ""
+        
+        dump_message(message) if sdebug
+
+        message.body.lines do |mline|
+          mkey,mval = mline.split(":",2)
+          sitename = mval.strip if mkey == "Site"
+          username = mval.strip if mkey == "User"
+          password = mval.strip if mkey == "Password"
+        end
+      
+        if sitename == ""
+          puts "Not a user-update message." if sdebug
+          next
+        end
+
+        if sites[sitename].nil?
+          puts "Site #{sitename} not configured on this server." if sdebug
+          next
+        end
+
+        accessfile = sites[sitename]['file']
+        accesstype = sites[sitename]['type']
+        userlist = sites[sitename]['users']
+
+        update_accesslist(userlist,accessfile,accesstype,username,password,sdebug)
+
+        logmessage("Added #{username} to #{accessfile}",client,report_topic,sdebug)
+      end
+    end
+    client.join
+    client.close
+  end
+else
+  begin
+    File.open(pidfile, 'w') {|f| f.write(pid) }
+  rescue Errno::EACCES
+    $log.error("Cannot create PID file. Check the permissions and try again.")
+    pid = nil
+    exit
+  end  
+  Process.detach(pid)
+end
