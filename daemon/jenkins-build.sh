@@ -13,6 +13,7 @@ BUILDN=${BUILD_NUMBER:=1}
 
 /usr/bin/fakeroot /usr/local/bin/fpm -s dir -t deb -n "stomp-access" -f \
   -v ${PKG_VER}.${BUILDN} --description "Future remote htaccess mangler" \
+  --config-files /etc/stomp-access/stomp-access.yaml \
   -a all -m "<list.itoperations@futurenet.com>" \
   -C ./build .
 
