@@ -47,12 +47,11 @@ def update_accesslist(userlist,accessfile,accesstype,username,password,debug)
   salt = Base64.encode64((("a".."z").to_a + ("A".."Z").to_a + (0..9).to_a).shuffle[0..7].join)
   spw = password.crypt(salt)
 
-  if File.exist?(userlist)
-    users_e = YAML.load_file(userlist)
-    puts users_e.inspect if debug
-  else
-    users_e = Hash.new{ |h,k| h[k] = Hash.new(&h.default_proc) }
-  end
+  users_e = nil
+  users_e = YAML.load_file(userlist) if File.exist?(userlist)
+  users_e = Hash.new{ |h,k| h[k] = Hash.new(&h.default_proc) } unless users_e
+
+  puts users_e.inspect if debug
 
   case accesstype
     when "haproxy"
@@ -205,40 +204,36 @@ if pid.nil?
     logmessage("V. #{version} connected to #{listen_topic}",client,report_topic,sdebug)
 
     client.subscribe "/topic/#{listen_topic}" do |message|
-      if message.body == "\n"
-        puts "Bodge-beat frame" if sdebug
-      else
-        sitename = ""
-        username = ""
-        password = ""
+      sitename = ''
+      username = ''
+      password = ''
         
-        dump_message(message) if sdebug
+      dump_message(message) if sdebug
 
-        message.body.lines do |mline|
-          mkey,mval = mline.split(":",2)
-          sitename = mval.strip if mkey == "Site"
-          username = mval.strip if mkey == "User"
-          password = mval.strip if mkey == "Password"
-        end
-      
-        if sitename == ""
-          puts "Not a user-update message." if sdebug
-          next
-        end
-
-        if sites[sitename].nil?
-          puts "Site #{sitename} not configured on this server." if sdebug
-          next
-        end
-
-        accessfile = sites[sitename]['file']
-        accesstype = sites[sitename]['type']
-        userlist = sites[sitename]['users']
-
-        update_accesslist(userlist,accessfile,accesstype,username,password,sdebug)
-
-        logmessage("Added #{username} to #{accessfile}",client,report_topic,sdebug)
+      message.body.lines do |mline|
+        mkey,mval = mline.split(":",2)
+        sitename = mval.strip if mkey == "Site"
+        username = mval.strip if mkey == "User"
+        password = mval.strip if mkey == "Password"
       end
+      
+      if sitename == ''
+        puts "Not a user-update message." if sdebug
+        next
+      end
+
+      if sites[sitename].nil?
+        puts "Site #{sitename} not configured on this server." if sdebug
+        next
+      end
+
+      accessfile = sites[sitename]['file']
+      accesstype = sites[sitename]['type']
+      userlist = sites[sitename]['users']
+
+      update_accesslist(userlist,accessfile,accesstype,username,password,sdebug)
+
+      logmessage("Added #{username} to #{accessfile}",client,report_topic,sdebug)
     end
     client.join
     client.close
