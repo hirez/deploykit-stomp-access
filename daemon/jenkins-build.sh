@@ -2,11 +2,11 @@
 
 mkdir -p build/usr/sbin/
 mkdir -p build/etc/stomp-access/
-mkdir -p build/etc/init.d/
+mkdir -p build/etc/systemd/system
 
 cp stomp-access build/usr/sbin/stomp-access
 cp stomp-access.yaml build/etc/stomp-access/stomp-access.yaml
-cp stomp-access.init build/etc/init.d/stomp-access
+cp stomp-access.service build/etc/systemd/system/stomp-access.service
 
 PKG_VER=`grep '^version' stomp-access | awk -F\" '{print $2}'`
 BUILDN=${BUILD_NUMBER:=1}
