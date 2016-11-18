@@ -134,17 +134,22 @@ end
 
 def reload_haproxy
   $log.info("Reloading haproxy configuration")
-  system("/etc/init.d/haproxy reload")
+  system("/usr/sbin/service haproxy reload")
 end
 
 def reload_nginx
   $log.info("Reloading nginx configuration")
-  system("/etc/init.d/nginx reload")
+  system("/usr/sbin/service nginx reload")
 end
 
 optparse = OptionParser.new do|opts|
   opts.banner = "Usage: stomp-access.rb [options]"
  
+  options[:systemd] = false
+  opts.on('-s', '--systemd', 'Do not detach') do
+    options[:systemd] = true
+  end
+
   options[:debug] = false
   opts.on( '-d', '--debug', 'Much output, do not detach' ) do
     options[:debug] = true
@@ -162,17 +167,19 @@ optparse = OptionParser.new do|opts|
 end
 
 optparse.parse!
+yconfig = YAML.load_file(options[:configfile])
+sdebug = options[:debug]
 
 $log = Logger.new("/var/log/stomp-access.log")
 $log.level = Logger::INFO
 
-if !options[:debug]
+unless (options[:debug] || options[:systemd])
   $stderr = Logwrite.new($log, "stderr")
   $stdout = Logwrite.new($log, "stdout")
   pid = Process.fork
 else
   pid = nil
-  puts "DEBUG"
+  puts "DEBUG" if sdebug
   puts "VERSION #{version}"
   puts "CONFIGFILE: #{options[:configfile]}"
 end
@@ -182,14 +189,6 @@ if pid.nil?
     $log.info("Terminating.")
         exit
     end
-
-  Signal.trap("HUP") do
-    yconfig = YAML.load_file(options[:configfile])
-    $log.info("Re-read #{options[:configfile]}")
-  end
-
-  yconfig = YAML.load_file(options[:configfile])
-  sdebug = options[:debug]
 
   puts YAML.dump(yconfig) if sdebug
 

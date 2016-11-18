@@ -1,0 +1,11 @@
+[Unit]
+Description=Stomp-access
+After=network.target
+
+[Service]
+Environment=CONFIG=/etc/stomp-access/stomp-access.yaml
+ExecStart=/usr/sbin/stomp-access -s
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
